@@ -81,6 +81,13 @@ INIT
  → DONE
 ```
 
+
+## 📂 Examples
+
+Visit the [examples/](./examples) directory to see ready-to-use projects:
+- **[Node.js App](./examples/nodejs-app)**: Simple web server with dependency caching.
+- **[Rust App](./examples/rust-app)**: High-performance async app showing complex build caching.
+
 ## 🚀 Quick Start
 
 ### Installation
