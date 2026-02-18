@@ -18,9 +18,9 @@ pub fn build_graph_from_instructions(instructions: Vec<Instruction>) -> BuildGra
 
         let mut env = std::collections::HashMap::new();
 
-        let (content, source_path) = match instr {
-            Instruction::From(img) => (format!("FROM {}", img), None),
-            Instruction::Workdir(dir) => (format!("WORKDIR {}", dir), None),
+        let (content, source_path, kind) = match instr {
+            Instruction::From(img) => (format!("FROM {}", img), None, crate::graph::NodeKind::From),
+            Instruction::Workdir(dir) => (format!("WORKDIR {}", dir), None, crate::graph::NodeKind::Workdir),
             Instruction::Copy(src, dst) => {
                 let path = if src == "." {
                     // Fix 3: COPY . . → hash entire project root
@@ -28,22 +28,23 @@ pub fn build_graph_from_instructions(instructions: Vec<Instruction>) -> BuildGra
                 } else {
                     project_root.join(src)
                 };
-                (format!("COPY {} {}", src, dst), Some(path))
+                (format!("COPY {} {}", src, dst), Some(path), crate::graph::NodeKind::Copy { src: PathBuf::from(src) })
             }
-            Instruction::Run(cmd) => (format!("RUN {}", cmd), None),
+            Instruction::Run(cmd) => (format!("RUN {}", cmd), None, crate::graph::NodeKind::Run),
             Instruction::Env(key, value) => {
                 env.insert(key.clone(), value.clone());
-                (format!("ENV {}={}", key, value), None)
+                (format!("ENV {}={}", key, value), None, crate::graph::NodeKind::Env)
             }
-            Instruction::Cmd(cmd) => (format!("CMD {}", cmd), None),
-            Instruction::Git(url, target) => (format!("GIT {} {}", url, target), None),
-            Instruction::Other(s) => (s.clone(), None),
+            Instruction::Cmd(cmd) => (format!("CMD {}", cmd), None, crate::graph::NodeKind::Other),
+            Instruction::Git(url, target) => (format!("GIT {} {}", url, target), None, crate::graph::NodeKind::Other),
+            Instruction::Other(s) => (s.clone(), None, crate::graph::NodeKind::Other),
         };
 
         let node = Node {
             id: i,
             name,
             content,
+            kind,
             hash: "".into(),
             dirty: false,
             source_path,

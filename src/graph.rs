@@ -1,11 +1,22 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum NodeKind {
+    From,
+    Run,
+    Copy { src: PathBuf },
+    Env,
+    Workdir,
+    Other,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Node {
     pub id: usize,
     pub name: String,
     pub content: String,
+    pub kind: NodeKind,
     pub hash: String,
     pub dirty: bool,
     pub deps: Vec<usize>,
@@ -13,6 +24,30 @@ pub struct Node {
     pub source_path: Option<PathBuf>,
     pub env: std::collections::HashMap<String, String>,
     pub cache_hit: bool,
+}
+
+impl Node {
+    /// Computes a unique key for the node based on its kind, content, dependencies, and optional context.
+    /// This is the heart of incremental builds.
+    pub fn compute_node_key(&self, dep_hashes: &[String], context_hash: Option<&str>) -> String {
+        let mut hasher = blake3::Hasher::new();
+        
+        // 1. Hash the kind and instruction content
+        hasher.update(format!("{:?}", self.kind).as_bytes());
+        hasher.update(self.content.as_bytes());
+        
+        // 2. Hash context if present (e.g. filesystem hash for COPY)
+        if let Some(ch) = context_hash {
+            hasher.update(ch.as_bytes());
+        }
+        
+        // 3. Hash dependencies to ensure propagation
+        for dep_hash in dep_hashes {
+            hasher.update(dep_hash.as_bytes());
+        }
+        
+        hasher.finalize().to_hex().to_string()
+    }
 }
 
 #[derive(Debug)]
