@@ -1,0 +1,69 @@
+use anyhow::Result;
+use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteCacheEntry {
+    pub key: String,
+    pub size: u64,
+}
+
+pub trait RemoteCache: Send + Sync {
+    fn has(&self, hash: &str) -> Result<bool>;
+    fn get(&self, hash: &str) -> Result<Option<Vec<u8>>>;
+    fn put(&self, hash: &str, data: &[u8]) -> Result<()>;
+}
+
+pub struct HttpRemoteCache {
+    base_url: String,
+    client: Client,
+}
+
+impl HttpRemoteCache {
+    pub fn new(base_url: String) -> Self {
+        Self {
+            base_url,
+            client: Client::new(),
+        }
+    }
+}
+
+impl RemoteCache for HttpRemoteCache {
+    fn has(&self, hash: &str) -> Result<bool> {
+        let url = format!("{}/cache/{}", self.base_url, hash);
+        let resp = self.client.head(&url).send()?;
+        Ok(resp.status().is_success())
+    }
+
+    fn get(&self, hash: &str) -> Result<Option<Vec<u8>>> {
+        let url = format!("{}/cache/{}", self.base_url, hash);
+        let resp = self.client.get(&url).send()?;
+        
+        if resp.status().is_success() {
+            let data = resp.bytes()?.to_vec();
+            Ok(Some(data))
+        } else if resp.status() == 404 {
+            Ok(None)
+        } else {
+            anyhow::bail!("Remote cache error: {}", resp.status());
+        }
+    }
+
+    fn put(&self, hash: &str, data: &[u8]) -> Result<()> {
+        let url = format!("{}/cache/{}", self.base_url, hash);
+        let resp = self.client.put(&url)
+            .body(data.to_vec())
+            .send()?;
+            
+        if !resp.status().is_success() {
+            anyhow::bail!("Failed to upload to remote cache: {}", resp.status());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Note: Integration tests would go here, but they require a running server.
+    // For unit tests, we'd need to mock the HTTP client.
+}

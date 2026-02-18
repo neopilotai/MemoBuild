@@ -1,0 +1,11 @@
+{
+  "name": "memobuild-demo",
+  "version": "1.0.0",
+  "description": "Demo app for MemoBuild Engine",
+  "main": "src/index.js",
+  "scripts": {
+    "build": "echo 'Building...' && mkdir -p dist && cp src/index.js dist/",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {}
+}

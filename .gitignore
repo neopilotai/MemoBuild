@@ -1,0 +1,5 @@
+/target/
+/.memobuild-output/
+/.memobuild-server/
+**/*.rs.bk
+.DS_Store

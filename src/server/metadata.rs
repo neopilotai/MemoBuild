@@ -1,0 +1,121 @@
+use anyhow::Result;
+use rusqlite::{params, Connection};
+use std::path::Path;
+use std::sync::Mutex;
+
+#[derive(Debug, Clone)]
+pub struct CacheEntry {
+    pub hash: String,
+    pub artifact_path: String,
+    pub size: u64,
+    pub created_at: String,
+    pub last_used: String,
+    pub hit_count: u32,
+}
+
+pub struct MetadataStore {
+    conn: Mutex<Connection>,
+}
+
+impl MetadataStore {
+    pub fn new(db_path: &Path) -> Result<Self> {
+        let conn = Connection::open(db_path)?;
+        
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache_entries (
+                hash TEXT PRIMARY KEY,
+                artifact_path TEXT NOT NULL,
+                size INTEGER,
+                created_at TEXT,
+                last_used TEXT,
+                hit_count INTEGER
+            )",
+            [],
+        )?;
+
+        Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    pub fn insert(&self, hash: &str, path: &str, size: u64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO cache_entries (hash, artifact_path, size, created_at, last_used, hit_count)
+             VALUES (?1, ?2, ?3, ?4, ?4, 0)
+             ON CONFLICT(hash) DO UPDATE SET
+                last_used = ?4,
+                hit_count = hit_count + 1",
+            params![hash, path, size, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn get(&self, hash: &str) -> Result<Option<CacheEntry>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT hash, artifact_path, size, created_at, last_used, hit_count FROM cache_entries WHERE hash = ?1",
+        )?;
+        let mut rows = stmt.query(params![hash])?;
+
+        if let Some(row) = rows.next()? {
+            Ok(Some(CacheEntry {
+                hash: row.get(0)?,
+                artifact_path: row.get(1)?,
+                size: row.get(2)?,
+                created_at: row.get(3)?,
+                last_used: row.get(4)?,
+                hit_count: row.get(5)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn touch(&self, hash: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE cache_entries SET last_used = ?1, hit_count = hit_count + 1 WHERE hash = ?2",
+            params![now, hash],
+        )?;
+        Ok(())
+    }
+
+    pub fn exists(&self, hash: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM cache_entries WHERE hash = ?1",
+            params![hash],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_metadata_store() {
+        let db_file = NamedTempFile::new().unwrap();
+        let store = MetadataStore::new(db_file.path()).unwrap();
+
+        let hash = "test-hash";
+        let path = "some/path";
+        let size = 1024;
+
+        store.insert(hash, path, size).unwrap();
+        assert!(store.exists(hash).unwrap());
+
+        let entry = store.get(hash).unwrap().unwrap();
+        assert_eq!(entry.hash, hash);
+        assert_eq!(entry.artifact_path, path);
+        assert_eq!(entry.size, size);
+
+        store.touch(hash).unwrap();
+        let updated_entry = store.get(hash).unwrap().unwrap();
+        assert_eq!(updated_entry.hit_count, 1);
+    }
+}

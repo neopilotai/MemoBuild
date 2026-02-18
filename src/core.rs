@@ -1,0 +1,90 @@
+use crate::graph::BuildGraph;
+use crate::hasher::{self, IgnoreRules};
+use blake3::Hasher;
+use std::path::Path;
+
+/// Hash a string using BLAKE3 (used for non-filesystem nodes)
+pub fn hash_str(input: &str) -> String {
+    let mut hasher = Hasher::new();
+    hasher.update(input.as_bytes());
+    hasher.finalize().to_hex().to_string()
+}
+
+/// Load ignore rules respecting precedence:
+/// Fix 4 — .dockerignore > .gitignore > empty (Docker's documented behaviour)
+fn load_ignore_rules(context_dir: &Path) -> IgnoreRules {
+    let dockerignore = context_dir.join(".dockerignore");
+    let gitignore = context_dir.join(".gitignore");
+
+    if dockerignore.exists() {
+        IgnoreRules::from_file(&dockerignore)
+    } else if gitignore.exists() {
+        IgnoreRules::from_file(&gitignore)
+    } else {
+        IgnoreRules::empty()
+    }
+}
+
+/// Detect changes in the build graph.
+/// - COPY nodes with a source_path → real filesystem hash via hasher module
+/// - All other nodes → BLAKE3 hash of content string
+pub fn detect_changes(graph: &mut BuildGraph) {
+    let context_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let ignore = load_ignore_rules(&context_dir);
+
+    for node in graph.nodes.iter_mut() {
+        let new_hash = if let Some(ref path) = node.source_path {
+            // Real filesystem hashing for COPY nodes
+            match hasher::hash_path(path, &ignore) {
+                Ok(h) => h,
+                Err(e) => {
+                    eprintln!("⚠️  Hash error for {}: {}", path.display(), e);
+                    hash_str(&node.content)
+                }
+            }
+        } else if node.content.starts_with("GIT ") {
+            // Git-based hashing for remote repositories
+            let parts: Vec<&str> = node.content.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let url = parts[1];
+                match crate::git::get_remote_head_hash(url) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        eprintln!("⚠️  Git hash error for {}: {}", url, e);
+                        hash_str(&node.content)
+                    }
+                }
+            } else {
+                hash_str(&node.content)
+            }
+        } else {
+            // Command / env / metadata nodes: hash the instruction text
+            hash_str(&node.content)
+        };
+
+        if node.hash != new_hash {
+            println!("   - {}: {} -> {}", node.name, &node.hash[..std::cmp::min(8, node.hash.len())], &new_hash[..8]);
+            node.dirty = true;
+            node.hash = new_hash;
+        }
+    }
+}
+
+/// Propagate dirty flags: if a dependency is dirty, mark all dependents dirty too.
+pub fn propagate_dirty(graph: &mut BuildGraph) {
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for i in 0..graph.nodes.len() {
+            let deps_dirty = graph.nodes[i]
+                .deps
+                .iter()
+                .any(|&d| d < graph.nodes.len() && graph.nodes[d].dirty);
+
+            if deps_dirty && !graph.nodes[i].dirty {
+                graph.nodes[i].dirty = true;
+                changed = true;
+            }
+        }
+    }
+}
