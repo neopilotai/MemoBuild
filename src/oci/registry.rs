@@ -40,7 +40,8 @@ impl RegistryClient {
         let index_path = layout_dir.join("index.json");
         let index_content = fs::read_to_string(&index_path)?;
         let index: serde_json::Value = serde_json::from_str(&index_content)?;
-        let manifest_digest = index["manifests"][0]["digest"].as_str()
+        let manifest_descriptor = &index["manifests"][0];
+        let manifest_digest = manifest_descriptor["digest"].as_str()
             .context("No manifest found in index.json")?;
 
         // 2. Read the manifest to find layers
@@ -62,6 +63,77 @@ impl RegistryClient {
         self.upload_manifest(&manifest_digest, &manifest_content)?;
 
         println!("✅ Image pushed successfully!");
+        Ok(())
+    }
+
+    /// Pull an image from the registry into an OCI layout directory
+    pub fn pull(&self, tag: &str, output_dir: &Path) -> Result<()> {
+        println!("📥 Pulling image {}/{} : {}...", self.base_url, self.repo, tag);
+        fs::create_dir_all(output_dir.join("blobs").join("sha256"))?;
+
+        // 1. Fetch Manifest
+        let manifest_url = format!("{}/{}/manifests/{}", self.base_url, self.repo, tag);
+        let mut rb = self.client.get(&manifest_url)
+            .header("Accept", "application/vnd.oci.image.manifest.v1+json");
+        if let Some(ref t) = self.token {
+            rb = rb.bearer_auth(t);
+        }
+
+        let resp = rb.send()?;
+        if !resp.status().is_success() {
+            anyhow::bail!("Failed to fetch manifest: {}", resp.status());
+        }
+
+        let manifest_content = resp.text()?;
+        let manifest: OCIManifest = serde_json::from_str(&manifest_content)?;
+        let manifest_digest = format!("sha256:{}", crate::oci::utils::sha256_string(&manifest_content));
+
+        // Save manifest
+        fs::write(output_dir.join("blobs").join("sha256").join(&manifest_digest[7..]), &manifest_content)?;
+
+        // 2. Fetch Config
+        self.download_blob(&manifest.config.digest, output_dir)?;
+
+        // 3. Fetch Layers
+        for layer in &manifest.layers {
+            self.download_blob(&layer.digest, output_dir)?;
+        }
+
+        // 4. Create index.json
+        let index = crate::oci::manifest::OCIIndex {
+            schema_version: 2,
+            manifests: vec![crate::oci::manifest::OCIDescriptor {
+                media_type: "application/vnd.oci.image.manifest.v1+json".to_string(),
+                digest: manifest_digest,
+                size: manifest_content.len() as u64,
+            }],
+        };
+        fs::write(output_dir.join("index.json"), serde_json::to_string_pretty(&index)?)?;
+        
+        // 5. Create oci-layout
+        fs::write(output_dir.join("oci-layout"), r#"{"imageLayoutVersion": "1.0.0"}"#)?;
+
+        println!("✅ Image pulled successfully to {}", output_dir.display());
+        Ok(())
+    }
+
+    fn download_blob(&self, digest: &str, output_dir: &Path) -> Result<()> {
+        println!("   📥 Downloading blob: {}...", status_hash(digest));
+        let url = format!("{}/{}/blobs/{}", self.base_url, self.repo, digest);
+        let mut rb = self.client.get(&url);
+        if let Some(ref t) = self.token {
+            rb = rb.bearer_auth(t);
+        }
+
+        let mut resp = rb.send()?;
+        if !resp.status().is_success() {
+            anyhow::bail!("Failed to download blob {}: {}", digest, resp.status());
+        }
+
+        let blob_path = output_dir.join("blobs").join("sha256").join(&digest[7..]);
+        let mut file = fs::File::create(blob_path)?;
+        std::io::copy(&mut resp, &mut file)?;
+
         Ok(())
     }
 

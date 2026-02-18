@@ -106,7 +106,7 @@ pub struct HybridCache<R: RemoteCache> {
     pub remote: Option<R>,
 }
 
-impl<R: RemoteCache> HybridCache<R> {
+impl<R: RemoteCache + 'static> HybridCache<R> {
     pub fn new(remote: Option<R>) -> Result<Self> {
         Ok(Self {
             local: LocalCache::new()?,
@@ -149,5 +149,41 @@ impl<R: RemoteCache> HybridCache<R> {
             remote.report_analytics(dirty, cached, duration_ms)?;
         }
         Ok(())
+    }
+
+    /// Smart Prefetching: Start downloading artifacts in the background
+    pub fn prefetch_artifacts(self: Arc<Self>, hashes: Vec<String>) {
+        for hash in hashes {
+            // Check local existence first (lightweight)
+            if self.local.exists(&hash) {
+                continue;
+            }
+
+            let cache_clone = self.clone();
+            let hash_clone = hash.clone();
+            
+            // Spawn background task to fetch from remote
+            tokio::task::spawn_blocking(move || {
+                if let Some(ref remote) = cache_clone.remote {
+                    // Try to get from remote
+                    match remote.get(&hash_clone) {
+                        Ok(Some(data)) => {
+                            // Successfully fetched, store in local cache
+                            if let Err(e) = cache_clone.local.put(&hash_clone, &data) {
+                                eprintln!("⚠️ Prefetch write error for {}: {}", hash_clone, e);
+                            } else {
+                                println!("   📥 Prefetched {} from remote", &hash_clone[..8]);
+                            }
+                        }
+                        Ok(None) => {
+                            // Not in remote cache, which is fine
+                        }
+                        Err(e) => {
+                            eprintln!("⚠️ Prefetch fetch error for {}: {}", hash_clone, e);
+                        }
+                    }
+                }
+            });
+        }
     }
 }

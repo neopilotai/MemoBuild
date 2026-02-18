@@ -19,6 +19,46 @@ use std::env;
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
 
+    // Support pulling an image: memobuild pull <registry>/<repo>:<tag>
+    if args.len() >= 3 && args[1] == "pull" {
+        let full_name = &args[2];
+        let (registry_repo, tag) = full_name.split_once(':').unwrap_or((full_name, "latest"));
+        let (registry, repo) = registry_repo.split_once('/').unwrap_or(("index.docker.io", registry_repo));
+
+        let output_dir = env::current_dir()?.join(".memobuild-cache").join("images").join(full_name.replace(':', "-").replace('/', "-"));
+        let client = oci::registry::RegistryClient::new(registry, repo);
+        client.pull(tag, &output_dir)?;
+        return Ok(());
+    }
+
+    // Support generating CI: memobuild generate-ci --type github
+    if args.len() >= 2 && args[1] == "generate-ci" {
+        let yaml = r#"name: MemoBuild CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install MemoBuild
+        run: cargo install --path .
+      - name: Build with Remote Cache
+        run: memobuild
+        env:
+          MEMOBUILD_REMOTE_URL: ${{ secrets.MEMOBUILD_REMOTE_URL }}
+      - name: Push Image
+        run: memobuild --push
+        env:
+          MEMOBUILD_REGISTRY: ghcr.io
+          MEMOBUILD_REPO: ${{ github.repository }}
+          MEMOBUILD_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+"#;
+        fs::create_dir_all(".github/workflows")?;
+        fs::write(".github/workflows/memobuild.yml", yaml)?;
+        println!("✅ GitHub Actions workflow generated at .github/workflows/memobuild.yml");
+        return Ok(());
+    }
+
     // Support starting the server: memobuild --server --port 8080
     if args.iter().any(|arg| arg == "--server") {
         #[cfg(feature = "server")]
@@ -61,6 +101,28 @@ async fn main() -> Result<()> {
     println!("📄 Parsing Dockerfile...");
     let instructions = docker::parser::parse_dockerfile(&dockerfile);
     
+    // 2.2 Automatic Base Image Pulling
+    for instr in &instructions {
+        if let docker::parser::Instruction::From(img) = instr {
+            if img.contains('/') || img.contains(':') {
+                println!("📦 Checking base image: {}...", img);
+                let (registry_repo, tag) = img.split_once(':').unwrap_or((img, "latest"));
+                let (registry, repo) = if registry_repo.contains('/') {
+                    registry_repo.split_once('/').unwrap()
+                } else {
+                    ("index.docker.io", registry_repo)
+                };
+
+                let image_cache_dir = env::current_dir()?.join(".memobuild-cache").join("images").join(img.replace(':', "-").replace('/', "-"));
+                if !image_cache_dir.exists() {
+                    println!("   📥 Base image not found locally, pulling...");
+                    let client = oci::registry::RegistryClient::new(registry, repo);
+                    let _ = client.pull(tag, &image_cache_dir);
+                }
+            }
+        }
+    }
+
     println!("📊 Building DAG...");
     let mut graph = docker::dag::build_graph_from_instructions(instructions);
 
@@ -72,6 +134,16 @@ async fn main() -> Result<()> {
 
     let dirty = graph.nodes.iter().filter(|n| n.dirty).count();
     println!("   {} dirty  |  {} cached", dirty, graph.nodes.len() - dirty);
+
+    // 2.5 Smart Prefetching
+    if dirty > 0 {
+        println!("🚀 Initiating smart prefetching for {} nodes...", dirty);
+        let dirty_hashes: Vec<String> = graph.nodes.iter()
+            .filter(|n| n.dirty)
+            .map(|n| n.hash.clone())
+            .collect();
+        cache.clone().prefetch_artifacts(dirty_hashes);
+    }
 
     println!("⚡ Executing build...");
     let build_start = std::time::Instant::now();
