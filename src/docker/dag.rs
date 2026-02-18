@@ -82,7 +82,9 @@ pub fn build_graph_from_instructions(instructions: Vec<Instruction>) -> BuildGra
 
                 // Check if RUN command references files that were copied
                 for (src_path, copy_idx) in &copy_sources {
-                    if (cmd.contains(src_path) || cmd.contains(&format!("./{}", src_path))) && !deps.contains(copy_idx) {
+                    if (cmd.contains(src_path) || cmd.contains(&format!("./{}", src_path)))
+                        && !deps.contains(copy_idx)
+                    {
                         deps.push(*copy_idx);
                     }
                 }
