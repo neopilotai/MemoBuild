@@ -20,7 +20,11 @@ pub fn build_graph_from_instructions(instructions: Vec<Instruction>) -> BuildGra
 
         let (content, source_path, kind) = match instr {
             Instruction::From(img) => (format!("FROM {}", img), None, crate::graph::NodeKind::From),
-            Instruction::Workdir(dir) => (format!("WORKDIR {}", dir), None, crate::graph::NodeKind::Workdir),
+            Instruction::Workdir(dir) => (
+                format!("WORKDIR {}", dir),
+                None,
+                crate::graph::NodeKind::Workdir,
+            ),
             Instruction::Copy(src, dst) => {
                 let path = if src == "." {
                     // Fix 3: COPY . . → hash entire project root
@@ -28,15 +32,29 @@ pub fn build_graph_from_instructions(instructions: Vec<Instruction>) -> BuildGra
                 } else {
                     project_root.join(src)
                 };
-                (format!("COPY {} {}", src, dst), Some(path), crate::graph::NodeKind::Copy { src: PathBuf::from(src) })
+                (
+                    format!("COPY {} {}", src, dst),
+                    Some(path),
+                    crate::graph::NodeKind::Copy {
+                        src: PathBuf::from(src),
+                    },
+                )
             }
             Instruction::Run(cmd) => (format!("RUN {}", cmd), None, crate::graph::NodeKind::Run),
             Instruction::Env(key, value) => {
                 env.insert(key.clone(), value.clone());
-                (format!("ENV {}={}", key, value), None, crate::graph::NodeKind::Env)
+                (
+                    format!("ENV {}={}", key, value),
+                    None,
+                    crate::graph::NodeKind::Env,
+                )
             }
             Instruction::Cmd(cmd) => (format!("CMD {}", cmd), None, crate::graph::NodeKind::Other),
-            Instruction::Git(url, target) => (format!("GIT {} {}", url, target), None, crate::graph::NodeKind::Other),
+            Instruction::Git(url, target) => (
+                format!("GIT {} {}", url, target),
+                None,
+                crate::graph::NodeKind::Other,
+            ),
             Instruction::Other(s) => (s.clone(), None, crate::graph::NodeKind::Other),
         };
 
