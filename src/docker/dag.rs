@@ -1,5 +1,5 @@
-use crate::graph::{BuildGraph, Node};
 use crate::docker::parser::Instruction;
+use crate::graph::{BuildGraph, Node};
 use std::path::PathBuf;
 
 /// Convert a flat list of Dockerfile instructions into a dependency graph.
@@ -8,8 +8,7 @@ use std::path::PathBuf;
 /// Fix 3 — COPY "." case: when src is "." we set source_path to the
 /// current working directory (project root) so the entire context is hashed.
 pub fn build_graph_from_instructions(instructions: Vec<Instruction>) -> BuildGraph {
-    let project_root = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."));
+    let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     let mut nodes: Vec<Node> = Vec::new();
     let mut last_id: Option<usize> = None;

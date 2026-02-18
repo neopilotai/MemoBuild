@@ -44,16 +44,16 @@ impl RemoteCache for HttpRemoteCache {
     fn get(&self, hash: &str) -> Result<Option<Vec<u8>>> {
         let url = format!("{}/cache/{}", self.base_url, hash);
         let mut resp = self.client.get(&url).send()?;
-        
+
         if resp.status().is_success() {
             let mut compressed_data = Vec::new();
             resp.read_to_end(&mut compressed_data)?;
-            
+
             // Decompress
             let mut decoder = GzDecoder::new(&compressed_data[..]);
             let mut decompressed_data = Vec::new();
             decoder.read_to_end(&mut decompressed_data)?;
-            
+
             Ok(Some(decompressed_data))
         } else if resp.status() == 404 {
             Ok(None)
@@ -70,16 +70,14 @@ impl RemoteCache for HttpRemoteCache {
         }
 
         let url = format!("{}/cache/{}", self.base_url, hash);
-        
+
         // Build artifact compression
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(data)?;
         let compressed_data = encoder.finish()?;
 
-        let resp = self.client.put(&url)
-            .body(compressed_data)
-            .send()?;
-            
+        let resp = self.client.put(&url).body(compressed_data).send()?;
+
         if !resp.status().is_success() {
             anyhow::bail!("Failed to upload to remote cache: {}", resp.status());
         }
@@ -94,9 +92,7 @@ impl RemoteCache for HttpRemoteCache {
             "duration_ms": duration_ms
         });
 
-        let resp = self.client.post(&url)
-            .json(&data)
-            .send()?;
+        let resp = self.client.post(&url).json(&data).send()?;
 
         if !resp.status().is_success() {
             eprintln!("Failed to report analytics: {}", resp.status());

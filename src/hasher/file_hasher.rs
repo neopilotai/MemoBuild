@@ -33,14 +33,17 @@ pub fn hash_file(path: &Path) -> Result<String> {
 /// Hash a directory tree recursively using Rayon for parallel execution.
 pub fn hash_dir(root: &Path, ignore: &IgnoreRules) -> Result<String> {
     let files = walk_dir(root, ignore);
-    
+
     // Fix 2: Parallel hashing of file contents using Rayon
-    let results: Result<Vec<(String, String)>> = files.par_iter().map(|abs_path| {
-        let rel = abs_path.strip_prefix(root).unwrap_or(abs_path.as_path());
-        let rel_path_str = rel.to_string_lossy().to_string();
-        let file_hash = hash_file(abs_path)?;
-        Ok((rel_path_str, file_hash))
-    }).collect();
+    let results: Result<Vec<(String, String)>> = files
+        .par_iter()
+        .map(|abs_path| {
+            let rel = abs_path.strip_prefix(root).unwrap_or(abs_path.as_path());
+            let rel_path_str = rel.to_string_lossy().to_string();
+            let file_hash = hash_file(abs_path)?;
+            Ok((rel_path_str, file_hash))
+        })
+        .collect();
 
     let mut top_hasher = Hasher::new();
     for (rel_path, file_hash) in results? {

@@ -37,7 +37,7 @@ impl LocalStorage {
 impl ArtifactStorage for LocalStorage {
     fn put(&self, hash: &str, data: &[u8]) -> Result<String> {
         let path = self.get_sharded_path(hash);
-        
+
         // Deduplication: if it exists, we assume the content is the same (hash matched)
         if path.exists() {
             return Ok(path.to_string_lossy().to_string());
@@ -46,11 +46,11 @@ impl ArtifactStorage for LocalStorage {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         let mut file = fs::File::create(&path)
             .with_context(|| format!("Failed to create artifact file at {}", path.display()))?;
         file.write_all(data)?;
-        
+
         Ok(path.to_string_lossy().to_string())
     }
 

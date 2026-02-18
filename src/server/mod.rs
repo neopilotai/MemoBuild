@@ -3,11 +3,11 @@ use crate::server::storage::{ArtifactStorage, LocalStorage};
 use anyhow::Result;
 use axum::{
     body::Bytes,
-    extract::{Path, State, Query},
+    extract::{Path, Query, State},
     http::StatusCode,
-    response::{IntoResponse, Html},
-    routing::{get, head, put, post},
-    Router, Json,
+    response::{Html, IntoResponse},
+    routing::{get, head, post, put},
+    Json, Router,
 };
 use serde::Deserialize;
 use std::net::SocketAddr;
@@ -66,9 +66,7 @@ pub async fn start_server(port: u16, data_dir: PathBuf, webhook_url: Option<Stri
     Ok(())
 }
 
-async fn get_analytics_handler(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn get_analytics_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.metadata.get_analytics(50) {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -257,7 +255,7 @@ async fn check_cache(
         Ok(true) => {
             let _ = state.metadata.touch(&hash);
             StatusCode::OK
-        },
+        }
         Ok(false) => StatusCode::NOT_FOUND,
         Err(e) => {
             eprintln!("Error checking cache: {}", e);
@@ -274,7 +272,7 @@ async fn get_artifact(
         Ok(Some(data)) => {
             let _ = state.metadata.touch(&hash);
             (StatusCode::OK, data).into_response()
-        },
+        }
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(e) => {
             eprintln!("Error getting artifact: {}", e);
@@ -296,13 +294,16 @@ async fn put_artifact(
     let actual_hash = hasher.finalize().to_hex().to_string();
 
     if actual_hash != hash {
-        eprintln!("CAS integrity failure: expected {}, got {}", hash, actual_hash);
+        eprintln!(
+            "CAS integrity failure: expected {}, got {}",
+            hash, actual_hash
+        );
         // We might want to be strict here, but let's just log for now or return error
-        // return StatusCode::BAD_REQUEST; 
+        // return StatusCode::BAD_REQUEST;
     }
 
     let size = body.len() as u64;
-    
+
     // 2. Store the blob
     match state.storage.put(&hash, &body) {
         Ok(path) => {
@@ -324,8 +325,11 @@ async fn gc_cache(
     State(state): State<Arc<AppState>>,
     Query(query): Query<GcQuery>,
 ) -> impl IntoResponse {
-    println!("🧹 Running Garbage Collection for entries older than {} days", query.days);
-    
+    println!(
+        "🧹 Running Garbage Collection for entries older than {} days",
+        query.days
+    );
+
     match state.metadata.get_old_entries(query.days) {
         Ok(hashes) => {
             let mut count = 0;
@@ -347,8 +351,10 @@ async fn report_analytics(
     State(state): State<Arc<AppState>>,
     axum::Json(data): axum::Json<AnalyticsData>,
 ) -> impl IntoResponse {
-    let result = state.metadata.record_build(data.dirty, data.cached, data.duration_ms);
-    
+    let result = state
+        .metadata
+        .record_build(data.dirty, data.cached, data.duration_ms);
+
     // Send build notification if webhook is configured
     if let Some(webhook_url) = state.webhook_url.clone() {
         let stats = data.clone();

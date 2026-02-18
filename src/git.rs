@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use std::process::Command;
 
 /// Fetch the latest commit hash (HEAD) for a remote Git repository.
@@ -15,7 +15,9 @@ pub fn get_remote_head_hash(url: &str) -> Result<String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let hash = stdout.split_whitespace().next()
+    let hash = stdout
+        .split_whitespace()
+        .next()
         .context("Could not parse hash from git ls-remote output")?;
 
     Ok(hash.to_string())

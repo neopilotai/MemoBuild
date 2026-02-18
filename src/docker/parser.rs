@@ -21,8 +21,10 @@ pub fn parse_dockerfile(content: &str) -> Vec<Instruction> {
         }
 
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.is_empty() { continue; }
-        
+        if parts.is_empty() {
+            continue;
+        }
+
         let keyword = parts[0].to_uppercase();
         let args = if line.len() > keyword.len() {
             line[keyword.len()..].trim()
@@ -53,9 +55,12 @@ pub fn parse_dockerfile(content: &str) -> Vec<Instruction> {
                 instructions.push(Instruction::Run(args.to_string()));
             }
             "ENV" => {
-                let env_parts: Vec<&str> = args.splitn(2, |c| c == ' ' || c == '=').collect();
+                let env_parts: Vec<&str> = args.splitn(2, [' ', '=']).collect();
                 if env_parts.len() == 2 {
-                    instructions.push(Instruction::Env(env_parts[0].to_string(), env_parts[1].to_string()));
+                    instructions.push(Instruction::Env(
+                        env_parts[0].to_string(),
+                        env_parts[1].to_string(),
+                    ));
                 }
             }
             "CMD" => {
@@ -63,16 +68,10 @@ pub fn parse_dockerfile(content: &str) -> Vec<Instruction> {
             }
             "GIT" => {
                 if parts.len() >= 3 {
-                    instructions.push(Instruction::Git(
-                        parts[1].to_string(),
-                        parts[2].to_string(),
-                    ));
+                    instructions.push(Instruction::Git(parts[1].to_string(), parts[2].to_string()));
                 } else if parts.len() == 2 {
                     // Default target dir to the repo name or "."
-                    instructions.push(Instruction::Git(
-                        parts[1].to_string(),
-                        ".".to_string(),
-                    ));
+                    instructions.push(Instruction::Git(parts[1].to_string(), ".".to_string()));
                 }
             }
             _ => {

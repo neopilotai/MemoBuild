@@ -1,9 +1,9 @@
+use crate::oci::manifest::OCIManifest;
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
-use serde::{Deserialize, Serialize};
+
 use std::fs;
 use std::path::Path;
-use crate::oci::manifest::OCIManifest;
 
 pub struct RegistryClient {
     client: Client,
@@ -41,26 +41,36 @@ impl RegistryClient {
         let index_content = fs::read_to_string(&index_path)?;
         let index: serde_json::Value = serde_json::from_str(&index_content)?;
         let manifest_descriptor = &index["manifests"][0];
-        let manifest_digest = manifest_descriptor["digest"].as_str()
+        let manifest_digest = manifest_descriptor["digest"]
+            .as_str()
             .context("No manifest found in index.json")?;
 
         // 2. Read the manifest to find layers
-        let manifest_path = layout_dir.join("blobs").join("sha256").join(&manifest_digest[7..]);
+        let manifest_path = layout_dir
+            .join("blobs")
+            .join("sha256")
+            .join(&manifest_digest[7..]);
         let manifest_content = fs::read_to_string(&manifest_path)?;
         let manifest: OCIManifest = serde_json::from_str(&manifest_content)?;
 
         // 3. Push layers
         for layer in &manifest.layers {
-            let layer_path = layout_dir.join("blobs").join("sha256").join(&layer.digest[7..]);
+            let layer_path = layout_dir
+                .join("blobs")
+                .join("sha256")
+                .join(&layer.digest[7..]);
             self.upload_blob(&layer.digest, &layer_path)?;
         }
 
         // 4. Push config
-        let config_path = layout_dir.join("blobs").join("sha256").join(&manifest.config.digest[7..]);
+        let config_path = layout_dir
+            .join("blobs")
+            .join("sha256")
+            .join(&manifest.config.digest[7..]);
         self.upload_blob(&manifest.config.digest, &config_path)?;
 
         // 5. Push manifest
-        self.upload_manifest(&manifest_digest, &manifest_content)?;
+        self.upload_manifest(manifest_digest, &manifest_content)?;
 
         println!("✅ Image pushed successfully!");
         Ok(())
@@ -68,12 +78,17 @@ impl RegistryClient {
 
     /// Pull an image from the registry into an OCI layout directory
     pub fn pull(&self, tag: &str, output_dir: &Path) -> Result<()> {
-        println!("📥 Pulling image {}/{} : {}...", self.base_url, self.repo, tag);
+        println!(
+            "📥 Pulling image {}/{} : {}...",
+            self.base_url, self.repo, tag
+        );
         fs::create_dir_all(output_dir.join("blobs").join("sha256"))?;
 
         // 1. Fetch Manifest
         let manifest_url = format!("{}/{}/manifests/{}", self.base_url, self.repo, tag);
-        let mut rb = self.client.get(&manifest_url)
+        let mut rb = self
+            .client
+            .get(&manifest_url)
             .header("Accept", "application/vnd.oci.image.manifest.v1+json");
         if let Some(ref t) = self.token {
             rb = rb.bearer_auth(t);
@@ -86,10 +101,19 @@ impl RegistryClient {
 
         let manifest_content = resp.text()?;
         let manifest: OCIManifest = serde_json::from_str(&manifest_content)?;
-        let manifest_digest = format!("sha256:{}", crate::oci::utils::sha256_string(&manifest_content));
+        let manifest_digest = format!(
+            "sha256:{}",
+            crate::oci::utils::sha256_string(&manifest_content)
+        );
 
         // Save manifest
-        fs::write(output_dir.join("blobs").join("sha256").join(&manifest_digest[7..]), &manifest_content)?;
+        fs::write(
+            output_dir
+                .join("blobs")
+                .join("sha256")
+                .join(&manifest_digest[7..]),
+            &manifest_content,
+        )?;
 
         // 2. Fetch Config
         self.download_blob(&manifest.config.digest, output_dir)?;
@@ -108,10 +132,16 @@ impl RegistryClient {
                 size: manifest_content.len() as u64,
             }],
         };
-        fs::write(output_dir.join("index.json"), serde_json::to_string_pretty(&index)?)?;
-        
+        fs::write(
+            output_dir.join("index.json"),
+            serde_json::to_string_pretty(&index)?,
+        )?;
+
         // 5. Create oci-layout
-        fs::write(output_dir.join("oci-layout"), r#"{"imageLayoutVersion": "1.0.0"}"#)?;
+        fs::write(
+            output_dir.join("oci-layout"),
+            r#"{"imageLayoutVersion": "1.0.0"}"#,
+        )?;
 
         println!("✅ Image pulled successfully to {}", output_dir.display());
         Ok(())
@@ -152,23 +182,18 @@ impl RegistryClient {
         if let Some(ref t) = self.token {
             rb = rb.bearer_auth(t);
         }
-        
+
         let resp = rb.send()?;
         if !resp.status().is_success() {
             anyhow::bail!("Failed to initiate blob upload: {}", resp.status());
         }
 
-        let location = resp.headers().get("Location")
+        let location = resp
+            .headers()
+            .get("Location")
             .context("No Location header in upload initiation")?
             .to_str()?;
 
-        // Perform the upload (monolithic for simplicity)
-        let upload_url = if location.contains("://") {
-            format!("{}&digest={}", location, digest)
-        } else {
-            // Some registries return relative paths
-            format!("{}?digest={}", location, digest) // This is oversimplified, usually it's more complex
-        };
 
         // Re-construct the URL if it's relative
         let final_url = if location.starts_with('/') {
@@ -180,8 +205,7 @@ impl RegistryClient {
         };
 
         let file_content = fs::read(path)?;
-        let mut rb = self.client.put(&final_url)
-            .body(file_content);
+        let mut rb = self.client.put(&final_url).body(file_content);
         if let Some(ref t) = self.token {
             rb = rb.bearer_auth(t);
         }
@@ -207,11 +231,13 @@ impl RegistryClient {
     fn upload_manifest(&self, digest: &str, content: &str) -> Result<()> {
         println!("   📜 Uploading manifest: {}...", status_hash(digest));
         let url = format!("{}/{}/manifests/latest", self.base_url, self.repo); // Using 'latest' tag
-        
-        let mut rb = self.client.put(&url)
+
+        let mut rb = self
+            .client
+            .put(&url)
             .header("Content-Type", "application/vnd.oci.image.manifest.v1+json")
             .body(content.to_string());
-        
+
         if let Some(ref t) = self.token {
             rb = rb.bearer_auth(t);
         }

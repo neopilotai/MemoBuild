@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use chrono::Utc;
 use crate::graph::BuildGraph;
 use crate::oci::layer::LayerInfo;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OCIConfig {
@@ -57,10 +57,14 @@ pub fn create_config(graph: &BuildGraph, layers: &[LayerInfo]) -> OCIConfig {
             fs_type: "layers".to_string(),
             diff_ids: layers.iter().map(|l| l.diff_id.clone()).collect(),
         },
-        history: graph.nodes.iter().map(|n| OCIHistory {
-            created: Utc::now().to_rfc3339(),
-            created_by: format!("MemoBuild: {}", n.name),
-            empty_layer: Some(false),
-        }).collect(),
+        history: graph
+            .nodes
+            .iter()
+            .map(|n| OCIHistory {
+                created: Utc::now().to_rfc3339(),
+                created_by: format!("MemoBuild: {}", n.name),
+                empty_layer: Some(false),
+            })
+            .collect(),
     }
 }

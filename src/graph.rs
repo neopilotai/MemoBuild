@@ -24,6 +24,15 @@ impl BuildGraph {
     pub fn new() -> Self {
         Self { nodes: Vec::new() }
     }
+}
+
+impl Default for BuildGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BuildGraph {
 
     /// Get nodes in topological order for execution
     pub fn topological_order(&self) -> Vec<usize> {
@@ -69,11 +78,11 @@ impl BuildGraph {
 
         let max_level = node_levels.iter().max().cloned().unwrap_or(0);
         let mut result = vec![Vec::new(); max_level + 1];
-        
+
         for (node_id, &level) in node_levels.iter().enumerate() {
             result[level].push(node_id);
         }
-        
+
         result
     }
 }

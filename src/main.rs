@@ -1,11 +1,11 @@
-use memobuild::{core, cache, executor, docker, oci, remote_cache};
+use memobuild::{cache, core, docker, executor, oci, remote_cache};
 
 #[cfg(feature = "server")]
 use memobuild::server;
 
 use anyhow::Result;
-use std::fs;
 use std::env;
+use std::fs;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -15,9 +15,14 @@ async fn main() -> Result<()> {
     if args.len() >= 3 && args[1] == "pull" {
         let full_name = &args[2];
         let (registry_repo, tag) = full_name.split_once(':').unwrap_or((full_name, "latest"));
-        let (registry, repo) = registry_repo.split_once('/').unwrap_or(("index.docker.io", registry_repo));
+        let (registry, repo) = registry_repo
+            .split_once('/')
+            .unwrap_or(("index.docker.io", registry_repo));
 
-        let output_dir = env::current_dir()?.join(".memobuild-cache").join("images").join(full_name.replace(':', "-").replace('/', "-"));
+        let output_dir = env::current_dir()?
+            .join(".memobuild-cache")
+            .join("images")
+            .join(full_name.replace([':', '/'], "-"));
         let client = oci::registry::RegistryClient::new(registry, repo);
         client.pull(tag, &output_dir)?;
         return Ok(());
@@ -89,13 +94,15 @@ spec:
     if args.iter().any(|arg| arg == "--server") {
         #[cfg(feature = "server")]
         {
-            let port = args.iter()
+            let port = args
+                .iter()
                 .position(|arg| arg == "--port")
                 .and_then(|i| args.get(i + 1))
                 .and_then(|p| p.parse::<u16>().ok())
                 .unwrap_or(8080);
-            
-            let webhook_url = args.iter()
+
+            let webhook_url = args
+                .iter()
                 .position(|arg| arg == "--webhook")
                 .and_then(|i| args.get(i + 1))
                 .cloned()
@@ -103,7 +110,7 @@ spec:
 
             let data_dir = env::current_dir()?.join(".memobuild-server");
             fs::create_dir_all(&data_dir)?;
-            
+
             server::start_server(port, data_dir, webhook_url).await?;
             return Ok(());
         }
@@ -132,7 +139,7 @@ spec:
 
     println!("📄 Parsing Dockerfile...");
     let instructions = docker::parser::parse_dockerfile(&dockerfile);
-    
+
     // 2.2 Automatic Base Image Pulling
     for instr in &instructions {
         if let docker::parser::Instruction::From(img) = instr {
@@ -145,7 +152,10 @@ spec:
                     ("index.docker.io", registry_repo)
                 };
 
-                let image_cache_dir = env::current_dir()?.join(".memobuild-cache").join("images").join(img.replace(':', "-").replace('/', "-"));
+                let image_cache_dir = env::current_dir()?
+                    .join(".memobuild-cache")
+                    .join("images")
+                    .join(img.replace([':', '/'], "-"));
                 if !image_cache_dir.exists() {
                     println!("   📥 Base image not found locally, pulling...");
                     let client = oci::registry::RegistryClient::new(registry, repo);
@@ -165,12 +175,18 @@ spec:
     core::propagate_dirty(&mut graph);
 
     let dirty = graph.nodes.iter().filter(|n| n.dirty).count();
-    println!("   {} dirty  |  {} cached", dirty, graph.nodes.len() - dirty);
+    println!(
+        "   {} dirty  |  {} cached",
+        dirty,
+        graph.nodes.len() - dirty
+    );
 
     // 2.5 Smart Prefetching
     if dirty > 0 {
         println!("🚀 Initiating smart prefetching for {} nodes...", dirty);
-        let dirty_hashes: Vec<String> = graph.nodes.iter()
+        let dirty_hashes: Vec<String> = graph
+            .nodes
+            .iter()
             .filter(|n| n.dirty)
             .map(|n| n.hash.clone())
             .collect();
@@ -183,14 +199,19 @@ spec:
     let duration = build_start.elapsed();
 
     // 3. Report Analytics
-    let _ = cache.report_analytics(dirty as u32, (graph.nodes.len() - dirty) as u32, duration.as_millis() as u64);
+    let _ = cache.report_analytics(
+        dirty as u32,
+        (graph.nodes.len() - dirty) as u32,
+        duration.as_millis() as u64,
+    );
 
     println!("📦 Exporting OCI Image...");
     let output_dir = oci::export_image(&graph, "memobuild-demo:latest")?;
 
     // 4. Push to Registry (Optional)
     if args.iter().any(|arg| arg == "--push") {
-        let registry_url = env::var("MEMOBUILD_REGISTRY").unwrap_or_else(|_| "localhost:5000".to_string());
+        let registry_url =
+            env::var("MEMOBUILD_REGISTRY").unwrap_or_else(|_| "localhost:5000".to_string());
         let repo = env::var("MEMOBUILD_REPO").unwrap_or_else(|_| "memobuild-demo".to_string());
         let token = env::var("MEMOBUILD_TOKEN").ok();
 

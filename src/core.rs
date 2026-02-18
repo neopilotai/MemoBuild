@@ -63,7 +63,12 @@ pub fn detect_changes(graph: &mut BuildGraph) {
         };
 
         if node.hash != new_hash {
-            println!("   - {}: {} -> {}", node.name, &node.hash[..std::cmp::min(8, node.hash.len())], &new_hash[..8]);
+            println!(
+                "   - {}: {} -> {}",
+                node.name,
+                &node.hash[..std::cmp::min(8, node.hash.len())],
+                &new_hash[..8]
+            );
             node.dirty = true;
             node.hash = new_hash;
         }

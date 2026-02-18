@@ -25,7 +25,7 @@ pub fn walk_dir(root: &Path, ignore: &IgnoreRules) -> Vec<PathBuf> {
         .collect();
 
     // Fix 1: explicit sort by path for OS-independent determinism
-    files.sort_by(|a, b| a.cmp(b));
+    files.sort();
     files
 }
 

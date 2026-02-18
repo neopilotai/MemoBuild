@@ -20,7 +20,7 @@ pub struct MetadataStore {
 impl MetadataStore {
     pub fn new(db_path: &Path) -> Result<Self> {
         let conn = Connection::open(db_path)?;
-        
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS cache_entries (
                 hash TEXT PRIMARY KEY,
@@ -33,7 +33,9 @@ impl MetadataStore {
             [],
         )?;
 
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     pub fn insert(&self, hash: &str, path: &str, size: u64) -> Result<()> {
@@ -103,7 +105,7 @@ impl MetadataStore {
             "SELECT hash FROM cache_entries WHERE last_used < datetime('now', '-' || ?1 || ' days')"
         )?;
         let rows = stmt.query_map(params![days], |row| row.get(0))?;
-        
+
         let mut hashes = Vec::new();
         for hash in rows {
             hashes.push(hash?);
@@ -137,7 +139,7 @@ impl MetadataStore {
         let mut stmt = conn.prepare(
             "SELECT id, timestamp, dirty_nodes, cached_nodes, duration_ms 
              FROM build_analytics 
-             ORDER BY timestamp DESC LIMIT ?1"
+             ORDER BY timestamp DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit], |row| {
             Ok(BuildRecord {
