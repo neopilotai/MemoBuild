@@ -5,9 +5,11 @@ use std::path::PathBuf;
 pub enum NodeKind {
     From,
     Run,
-    Copy { src: PathBuf },
+    Copy { src: PathBuf, dst: PathBuf },
     Env,
     Workdir,
+    Cmd,
+    Git { url: String, target: PathBuf },
     Other,
 }
 
@@ -24,11 +26,29 @@ pub struct Node {
     pub source_path: Option<PathBuf>,
     pub env: std::collections::HashMap<String, String>,
     pub cache_hit: bool,
+    /// Additional metadata for rich node tracking
+    pub metadata: NodeMetadata,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct NodeMetadata {
+    /// Timestamp when node was last executed
+    pub last_executed: Option<std::time::SystemTime>,
+    /// Execution duration in milliseconds
+    pub execution_time_ms: Option<u64>,
+    /// Whether this node can be executed in parallel
+    pub parallelizable: bool,
+    /// Node priority for execution scheduling
+    pub priority: u8,
+    /// Custom tags for node categorization
+    pub tags: Vec<String>,
+    /// Content hash of source files (for COPY nodes)
+    pub source_content_hash: Option<String>,
 }
 
 impl Node {
     /// Computes a unique key for the node based on its kind, content, dependencies, and optional context.
-    /// This is the heart of incremental builds.
+    /// This is the heart of incremental builds and content-addressed identities.
     pub fn compute_node_key(&self, dep_hashes: &[String], context_hash: Option<&str>) -> String {
         let mut hasher = blake3::Hasher::new();
 
@@ -36,15 +56,37 @@ impl Node {
         hasher.update(format!("{:?}", self.kind).as_bytes());
         hasher.update(self.content.as_bytes());
 
-        // 2. Hash context if present (e.g. filesystem hash for COPY)
+        // 2. Hash environment variables for ENV nodes
+        if !self.env.is_empty() {
+            let mut env_keys: Vec<_> = self.env.keys().collect();
+            env_keys.sort(); // Ensure deterministic ordering
+            for key in env_keys {
+                if let Some(value) = self.env.get(key) {
+                    hasher.update(format!("{}={}", key, value).as_bytes());
+                }
+            }
+        }
+
+        // 3. Hash context if present (e.g. filesystem hash for COPY)
         if let Some(ch) = context_hash {
             hasher.update(ch.as_bytes());
         }
 
-        // 3. Hash dependencies to ensure propagation
-        for dep_hash in dep_hashes {
+        // 4. Hash source content hash if available (for COPY nodes)
+        if let Some(source_hash) = &self.metadata.source_content_hash {
+            hasher.update(source_hash.as_bytes());
+        }
+
+        // 5. Hash dependencies to ensure propagation
+        let mut sorted_dep_hashes = dep_hashes.to_vec();
+        sorted_dep_hashes.sort(); // Ensure deterministic ordering
+        for dep_hash in sorted_dep_hashes {
             hasher.update(dep_hash.as_bytes());
         }
+
+        // 6. Hash metadata that affects execution
+        hasher.update(format!("parallelizable={}", self.metadata.parallelizable).as_bytes());
+        hasher.update(format!("priority={}", self.metadata.priority).as_bytes());
 
         hasher.finalize().to_hex().to_string()
     }
