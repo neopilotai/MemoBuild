@@ -301,6 +301,7 @@ for node in topological_order:
 - [x] Kubernetes integration (Job manifest generator)
 - [x] Build notifications (Webhook support)
 - [x] Web dashboard (Real-time build visualization)
+- [x] Examples and Documentation (Node.js/Rust demos)
 
 ## 🧪 Testing
 
