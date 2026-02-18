@@ -93,3 +93,24 @@ pub fn propagate_dirty(graph: &mut BuildGraph) {
         }
     }
 }
+
+/// Recompute composite hashes for all nodes using topological order.
+/// This ensures that a node's hash reflects its content, dependencies, and environment.
+pub fn compute_composite_hashes(graph: &mut BuildGraph, env_fp: &crate::env::EnvFingerprint) {
+    let order = graph.topological_order();
+
+    for node_id in order {
+        let dep_hashes: Vec<String> = graph.nodes[node_id]
+            .deps
+            .iter()
+            .map(|&d| graph.nodes[d].hash.clone())
+            .collect();
+
+        let context_hash = graph.nodes[node_id].metadata.source_content_hash.as_deref();
+
+        let composite_hash =
+            graph.nodes[node_id].compute_node_key(&dep_hashes, context_hash, Some(env_fp));
+
+        graph.nodes[node_id].hash = composite_hash;
+    }
+}

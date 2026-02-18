@@ -49,7 +49,12 @@ pub struct NodeMetadata {
 impl Node {
     /// Computes a unique key for the node based on its kind, content, dependencies, and optional context.
     /// This is the heart of incremental builds and content-addressed identities.
-    pub fn compute_node_key(&self, dep_hashes: &[String], context_hash: Option<&str>) -> String {
+    pub fn compute_node_key(
+        &self,
+        dep_hashes: &[String],
+        context_hash: Option<&str>,
+        env_fingerprint: Option<&crate::env::EnvFingerprint>,
+    ) -> String {
         let mut hasher = blake3::Hasher::new();
 
         // 1. Hash the kind and instruction content
@@ -87,6 +92,11 @@ impl Node {
         // 6. Hash metadata that affects execution
         hasher.update(format!("parallelizable={}", self.metadata.parallelizable).as_bytes());
         hasher.update(format!("priority={}", self.metadata.priority).as_bytes());
+
+        // 7. Hash environment fingerprint for global determinism
+        if let Some(fp) = env_fingerprint {
+            hasher.update(fp.hash().as_bytes());
+        }
 
         hasher.finalize().to_hex().to_string()
     }

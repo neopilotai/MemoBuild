@@ -10,6 +10,8 @@ pub struct IncrementalExecutor<R: RemoteCache + 'static> {
     cache: Arc<HybridCache<R>>,
     execution_stats: ExecutionStats,
     observer: Option<Arc<dyn crate::dashboard::BuildObserver>>,
+    reproducible: bool,
+    sandbox: Arc<dyn crate::sandbox::Sandbox>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -28,7 +30,19 @@ impl<R: RemoteCache + 'static> IncrementalExecutor<R> {
             cache,
             execution_stats: ExecutionStats::default(),
             observer: None,
+            reproducible: false,
+            sandbox: Arc::new(crate::sandbox::local::LocalSandbox),
         }
+    }
+
+    pub fn with_sandbox(mut self, sandbox: Arc<dyn crate::sandbox::Sandbox>) -> Self {
+        self.sandbox = sandbox;
+        self
+    }
+
+    pub fn with_reproducible(mut self, reproducible: bool) -> Self {
+        self.reproducible = reproducible;
+        self
     }
 
     pub fn with_observer(mut self, observer: Arc<dyn crate::dashboard::BuildObserver>) -> Self {
@@ -109,13 +123,15 @@ impl<R: RemoteCache + 'static> IncrementalExecutor<R> {
         let mut futures = Vec::new();
 
         for &&node_id in node_ids {
-            let node = &graph.nodes[node_id];
+            let node = graph.nodes[node_id].clone();
             let name = node.name.clone();
             let hash = node.hash.clone();
             let dirty = node.dirty;
             let kind = node.kind.clone();
             let cache = self.cache.clone();
             let observer = self.observer.clone();
+            let sandbox = self.sandbox.clone();
+            let reproducible = self.reproducible;
 
             futures.push(async move {
                 if let Some(ref obs) = observer {
@@ -125,7 +141,18 @@ impl<R: RemoteCache + 'static> IncrementalExecutor<R> {
                     });
                 }
                 let start_time = Instant::now();
-                let result = Self::execute_node_logic(cache, &name, &hash, dirty, &kind).await;
+                let result = Self::execute_node_logic(
+                    cache,
+                    node_id,
+                    &name,
+                    &hash,
+                    dirty,
+                    &kind,
+                    reproducible,
+                    sandbox,
+                    &node,
+                )
+                .await;
                 let execution_time = start_time.elapsed().as_millis() as u64;
 
                 if let Some(ref obs) = observer {
@@ -192,10 +219,14 @@ impl<R: RemoteCache + 'static> IncrementalExecutor<R> {
 
             let result = Self::execute_node_logic(
                 self.cache.clone(),
+                node_id,
                 &node.name,
                 &node.hash,
                 node.dirty,
                 &node.kind,
+                self.reproducible,
+                self.sandbox.clone(),
+                node,
             )
             .await;
 
@@ -237,12 +268,17 @@ impl<R: RemoteCache + 'static> IncrementalExecutor<R> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn execute_node_logic(
         cache: Arc<HybridCache<R>>,
+        _node_id: usize,
         name: &str,
         hash: &str,
         dirty: bool,
-        kind: &crate::graph::NodeKind,
+        _kind: &crate::graph::NodeKind,
+        reproducible: bool,
+        sandbox: Arc<dyn crate::sandbox::Sandbox>,
+        node: &crate::graph::Node,
     ) -> Result<(bool, bool)> {
         // 1. Check cache first
         match cache.get_artifact(hash).await {
@@ -257,41 +293,37 @@ impl<R: RemoteCache + 'static> IncrementalExecutor<R> {
         // 2. Build if dirty or not cached
         if dirty {
             println!("🔧 Rebuilding node: {}...", name);
-            let artifact_data = Self::build_node_artifact_static(kind)?;
-
-            if let Err(e) = cache.put_artifact(hash, &artifact_data).await {
-                eprintln!("⚠️ Cache put error for {}: {}", name, e);
-            }
-            Ok((false, false))
         } else {
-            // Node is clean but not in cache - rebuild it
-            println!("🔨 Building clean node: {}...", name);
-            let artifact_data = Self::build_node_artifact_static(kind)?;
-
-            if let Err(e) = cache.put_artifact(hash, &artifact_data).await {
-                eprintln!("⚠️ Cache put error for {}: {}", name, e);
-            }
-            Ok((false, false))
+            println!("🔨 Building clean node (not in cache): {}...", name);
         }
-    }
 
-    fn build_node_artifact_static(kind: &crate::graph::NodeKind) -> Result<Vec<u8>> {
-        let artifact_content = match kind {
-            crate::graph::NodeKind::From => "FROM artifact".to_string(),
-            crate::graph::NodeKind::Run => "RUN artifact".to_string(),
-            crate::graph::NodeKind::Copy { src, dst } => {
-                format!("COPY artifact: {} -> {}", src.display(), dst.display())
-            }
-            crate::graph::NodeKind::Env => "ENV artifact".to_string(),
-            crate::graph::NodeKind::Workdir => "WORKDIR artifact".to_string(),
-            crate::graph::NodeKind::Cmd => "CMD artifact".to_string(),
-            crate::graph::NodeKind::Git { url, target } => {
-                format!("GIT artifact: {} -> {}", url, target.display())
-            }
-            crate::graph::NodeKind::Other => "OTHER artifact".to_string(),
-        };
+        // Prepare sandbox
+        let env = sandbox.prepare(node)?;
 
-        Ok(artifact_content.into_bytes())
+        // Execute command
+        let exec_result = sandbox.execute(&env, node)?;
+
+        if exec_result.exit_code != 0 {
+            anyhow::bail!(
+                "Command failed with exit code {}: {}",
+                exec_result.exit_code,
+                String::from_utf8_lossy(&exec_result.stderr)
+            );
+        }
+
+        let mut artifact_data = exec_result.stdout;
+
+        if reproducible {
+            artifact_data = crate::reproducible::normalize_artifact(artifact_data)?;
+        }
+
+        if let Err(e) = cache.put_artifact(hash, &artifact_data).await {
+            eprintln!("⚠️ Cache put error for {}: {}", name, e);
+        }
+
+        sandbox.cleanup(&env)?;
+
+        Ok((false, false))
     }
 
     /// Print execution summary
@@ -324,8 +356,9 @@ pub async fn execute_graph<R: RemoteCache + 'static>(
     graph: &mut BuildGraph,
     cache: Arc<HybridCache<R>>,
     observer: Option<Arc<dyn crate::dashboard::BuildObserver>>,
+    reproducible: bool,
 ) -> Result<()> {
-    let mut executor = IncrementalExecutor::new(cache);
+    let mut executor = IncrementalExecutor::new(cache).with_reproducible(reproducible);
     if let Some(obs) = observer {
         executor = executor.with_observer(obs);
     }

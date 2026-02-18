@@ -135,14 +135,14 @@ RUN npm install
 
     // Compute node keys
     let dep_hashes: Vec<String> = vec![]; // No dependencies for FROM node
-    let from_key1 = graph.nodes[0].compute_node_key(&dep_hashes, None);
-    let from_key2 = graph.nodes[0].compute_node_key(&dep_hashes, None);
+    let from_key1 = graph.nodes[0].compute_node_key(&dep_hashes, None, None);
+    let from_key2 = graph.nodes[0].compute_node_key(&dep_hashes, None, None);
 
     // Same node should produce same key
     assert_eq!(from_key1, from_key2, "Same node should produce same key");
 
     // Different nodes should produce different keys
-    let copy_key = graph.nodes[1].compute_node_key(&[from_key1.clone()], None);
+    let copy_key = graph.nodes[1].compute_node_key(&[from_key1.clone()], None, None);
     assert_ne!(
         from_key1, copy_key,
         "Different nodes should produce different keys"
@@ -150,7 +150,7 @@ RUN npm install
 
     // Key should change with different context hash
     let copy_key_with_context =
-        graph.nodes[1].compute_node_key(&[from_key1], Some("different_context"));
+        graph.nodes[1].compute_node_key(&[from_key1], Some("different_context"), None);
     assert_ne!(
         copy_key, copy_key_with_context,
         "Key should change with different context"
@@ -192,7 +192,7 @@ async fn test_end_to_end_build_with_remote_cache() {
     let dockerfile_path = build_path.join("Dockerfile");
     fs::write(
         &dockerfile_path,
-        "FROM alpine\nRUN echo 'hello world' > /hello.txt",
+        "FROM alpine\nRUN echo 'hello world' > hello.txt",
     )
     .unwrap();
 
@@ -205,14 +205,14 @@ async fn test_end_to_end_build_with_remote_cache() {
     let cache = Arc::new(cache::HybridCache::new(Some(remote)).unwrap());
 
     // 6. Run First Build (Populate Cache)
-    let dockerfile_content = "FROM alpine\nRUN echo 'hello world' > /hello.txt";
+    let dockerfile_content = "FROM alpine\nRUN echo 'hello world' > hello.txt";
     let instructions = docker::parser::parse_dockerfile(dockerfile_content);
     let mut graph = docker::dag::build_graph_from_instructions(instructions);
 
     core::detect_changes(&mut graph);
     core::propagate_dirty(&mut graph);
 
-    executor::execute_graph(&mut graph, cache.clone(), None)
+    executor::execute_graph(&mut graph, cache.clone(), None, false)
         .await
         .expect("First build failed");
 
@@ -230,7 +230,7 @@ async fn test_end_to_end_build_with_remote_cache() {
     let remote2 = remote_cache::HttpRemoteCache::new(format!("http://127.0.0.1:{}", port));
     let cache2 = Arc::new(cache::HybridCache::new(Some(remote2)).unwrap());
 
-    executor::execute_graph(&mut graph2, cache2.clone(), None)
+    executor::execute_graph(&mut graph2, cache2.clone(), None, false)
         .await
         .expect("Second build failed");
 

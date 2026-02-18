@@ -67,8 +67,8 @@ RUN npm run build
     // Test content-addressed identities
     println!("\n🔐 Content-Addressed Identity Test:");
     let dep_hashes: Vec<String> = vec![];
-    let from_key1 = graph.nodes[0].compute_node_key(&dep_hashes, None);
-    let from_key2 = graph.nodes[0].compute_node_key(&dep_hashes, None);
+    let from_key1 = graph.nodes[0].compute_node_key(&dep_hashes, None, None);
+    let from_key2 = graph.nodes[0].compute_node_key(&dep_hashes, None, None);
 
     if from_key1 == from_key2 {
         println!("  ✅ Same node produces same key: {}...", &from_key1[..16]);
@@ -76,7 +76,7 @@ RUN npm run build
         println!("  ❌ Same node should produce same key");
     }
 
-    let copy_key = graph.nodes[copy_package_idx].compute_node_key(&[from_key1.clone()], None);
+    let copy_key = graph.nodes[copy_package_idx].compute_node_key(&[from_key1.clone()], None, None);
     if from_key1 != copy_key {
         println!("  ✅ Different nodes produce different keys");
         println!("    FROM: {}...", &from_key1[..16]);

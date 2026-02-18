@@ -119,6 +119,10 @@ spec:
 
     println!("🚀 MemoBuild Engine Starting...");
 
+    // 0. Collect Environment Fingerprint
+    let env_fp = memobuild::env::EnvFingerprint::collect();
+    println!("   🔑 Env Fingerprint: {}", &env_fp.hash()[..8]);
+
     // 1. Initialize Cache
     let remote_url = env::var("MEMOBUILD_REMOTE_URL").ok();
     let remote_cache = remote_url.map(remote_cache::HttpRemoteCache::new);
@@ -184,6 +188,9 @@ spec:
     println!("🔄 Propagating dirty flags...");
     core::propagate_dirty(&mut graph);
 
+    println!("🔑 Recomputing deterministic hashes...");
+    core::compute_composite_hashes(&mut graph, &env_fp);
+
     let dirty = graph.nodes.iter().filter(|n| n.dirty).count();
     println!(
         "   {} dirty  |  {} cached",
@@ -208,9 +215,14 @@ spec:
         cache.clone().prefetch_artifacts(dirty_hashes);
     }
 
-    println!("⚡ Executing build...");
+    let reproducible = args.iter().any(|arg| arg == "--reproducible");
+    if reproducible {
+        println!("🔒 Reproducible build mode enabled");
+    }
+
+    println!("⚡ Executing build... ");
     let build_start = std::time::Instant::now();
-    executor::execute_graph(&mut graph, cache.clone(), observer).await?;
+    executor::execute_graph(&mut graph, cache.clone(), observer, reproducible).await?;
     let duration = build_start.elapsed();
 
     // 3. Report Analytics

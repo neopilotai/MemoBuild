@@ -96,7 +96,7 @@ pub fn build_graph_from_instructions(instructions: Vec<Instruction>) -> BuildGra
                 metadata.tags.push("run".to_string());
 
                 (
-                    format!("RUN {}", cmd),
+                    cmd.clone(),
                     None,
                     crate::graph::NodeKind::Run,
                     deps,
