@@ -289,11 +289,11 @@ for node in topological_order:
 
 ### Phase 4: Integration 🚧
 - [x] Docker registry push (OCI Distribution Spec)
-- [ ] Docker registry pull
+- [x] Docker registry pull (Self-hosting base images)
+- [x] CI/CD pipeline support (GitHub Actions generator)
 - [ ] Kubernetes integration
-- [ ] CI/CD pipeline support
 - [ ] Build notifications
-- [ ] Web dashboard
+- [x] Web dashboard (Real-time build visualization)
 
 ## 🧪 Testing
 

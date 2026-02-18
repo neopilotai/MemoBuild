@@ -131,6 +131,41 @@ impl MetadataStore {
 
         Ok(())
     }
+
+    pub fn get_analytics(&self, limit: u32) -> Result<Vec<BuildRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, timestamp, dirty_nodes, cached_nodes, duration_ms 
+             FROM build_analytics 
+             ORDER BY timestamp DESC LIMIT ?1"
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok(BuildRecord {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                dirty_nodes: row.get(2)?,
+                cached_nodes: row.get(3)?,
+                duration_ms: row.get(4)?,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+}
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct BuildRecord {
+    pub id: i32,
+    pub timestamp: String,
+    pub dirty_nodes: u32,
+    pub cached_nodes: u32,
+    pub duration_ms: u64,
 }
 
 #[cfg(test)]
