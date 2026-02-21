@@ -1,39 +1,72 @@
 /// MemoBuild error types and handling utilities
 /// Main error type for MemoBuild operations
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum MemoBuildError {
     /// CAS (Content-Addressable Storage) integrity violation
-    #[error("CAS integrity failure: expected {expected}, got {actual} (size: {data_size} bytes)")]
     CASIntegrityFailure {
         expected: String,
         actual: String,
         data_size: usize,
     },
     /// Network error with retry information
-    #[error("Network error (attempt {attempt}, retryable: {retryable}): {message}")]
     NetworkError {
         message: String,
         retryable: bool,
         attempt: u32,
     },
     /// Storage operation failed
-    #[error("Storage error in {operation}: {reason}")]
     StorageError { operation: String, reason: String },
     /// Cache coherency violation
-    #[error("Cache coherency error for {hash}: {reason}")]
     CacheCoherencyError { hash: String, reason: String },
     /// Remote cache synchronization failed
-    #[error("Sync error: {message}")]
     SyncError { message: String, recovered: bool },
     /// Metadata store error
-    #[error("Metadata error in {operation}: {reason}")]
     MetadataError { operation: String, reason: String },
     /// Resource conflict or constraint violation
-    #[error("Constraint violation: {reason}")]
     ConstraintViolation { reason: String },
     /// Wrapped anyhow error for compatibility
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
+    Other(anyhow::Error),
+}
+
+impl std::fmt::Display for MemoBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CASIntegrityFailure { expected, actual, data_size } => {
+                write!(f, "CAS integrity failure: expected {}, got {} (size: {} bytes)", expected, actual, data_size)
+            }
+            Self::NetworkError { message, retryable, attempt } => {
+                write!(f, "Network error (attempt {}, retryable: {}): {}", attempt, retryable, message)
+            }
+            Self::StorageError { operation, reason } => {
+                write!(f, "Storage error in {}: {}", operation, reason)
+            }
+            Self::CacheCoherencyError { hash, reason } => {
+                write!(f, "Cache coherency error for {}: {}", hash, reason)
+            }
+            Self::SyncError { message, recovered } => {
+                if *recovered {
+                    write!(f, "Sync error (recovered): {}", message)
+                } else {
+                    write!(f, "Sync error: {}", message)
+                }
+            }
+            Self::MetadataError { operation, reason } => {
+                write!(f, "Metadata error in {}: {}", operation, reason)
+            }
+            Self::ConstraintViolation { reason } => {
+                write!(f, "Constraint violation: {}", reason)
+            }
+            Self::Other(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for MemoBuildError {}
+
+impl From<anyhow::Error> for MemoBuildError {
+    fn from(err: anyhow::Error) -> Self {
+        MemoBuildError::Other(err)
+    }
 }
 
 /// Helper to determine if an error is retryable
@@ -76,9 +109,9 @@ pub fn calculate_backoff(attempt: u32, config: &RetryConfig) -> u64 {
         * config.backoff_multiplier.powi(attempt as i32))
     .min(config.max_backoff_ms as f64) as u64;
 
-    // Add jitter: ±20% of backoff
+    // Add jitter: ±20% of backoff, then clamp to max
     let jitter = (backoff as f64) * (rand::random::<f64>() * 0.4 - 0.2);
-    ((backoff as f64) + jitter).max(0.0) as u64
+    ((backoff as f64) + jitter).max(0.0).min(config.max_backoff_ms as f64) as u64
 }
 
 #[cfg(test)]

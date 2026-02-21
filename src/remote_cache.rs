@@ -283,7 +283,7 @@ pub mod tests {
 
     /// Helper to test retry_with_backoff logic
     pub async fn test_retry_with_backoff<F, Fut, T>(
-        mut operation: F,
+        operation: F,
         config: &crate::error::RetryConfig,
     ) -> Result<T>
     where
