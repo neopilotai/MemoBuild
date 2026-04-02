@@ -45,6 +45,20 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt", "ansi"] }
 clap = { version = "4.4", features = ["derive", "env"] }
 chrono = { version = "0.4", features = ["serde"] }
+rustls = "0.21"
+rustls-pemfile = "1.0"
+axum-server = { version = "0.5", features = ["tls-rustls"] }
+rcgen = "0.11"
+tower_governor = "0.3"
+governor = "0.6"
+vaultrs = "0.7"
+
+# Phase 2: Object storage + Redis + metrics
+fred = { version = "6", features = ["serde-json"] }
+aws-sdk-s3 = "0.35"
+aws-config = "0.57"
+google-cloud-storage = "0.14"
+prometheus-client = "0.22"
 
 colored = "3.1.1"
 indicatif = "0.18.4"
