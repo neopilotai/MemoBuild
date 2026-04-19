@@ -20,6 +20,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+// use tower_governor::GovernorLayer;
 
 pub mod metadata;
 pub mod storage;
@@ -30,6 +31,7 @@ pub struct AppState {
     pub webhook_url: Option<String>,
     pub tx_events: broadcast::Sender<crate::dashboard::BuildEvent>,
     pub current_dag: Arc<std::sync::Mutex<Option<crate::graph::BuildGraph>>>,
+    pub auth_state: Arc<crate::auth::AuthState>,
 }
 
 #[derive(Deserialize)]
@@ -59,6 +61,7 @@ pub async fn start_server(
     webhook_url: Option<String>,
     tls_config: Option<crate::tls::TlsConfig>,
     admin_token: Option<String>,
+    auth_db_client: Option<tokio_postgres::Client>,
 ) -> Result<()> {
     let db_path = data_dir.join("metadata.db");
     let metadata = MetadataStore::new(&db_path)?;
@@ -70,15 +73,16 @@ pub async fn start_server(
     let (tx_events, _) = broadcast::channel(crate::constants::MAX_WS_BROADCAST_CAPACITY);
     let current_dag = Arc::new(std::sync::Mutex::new(None));
 
+    let auth_state = Arc::new(crate::auth::AuthState::new(admin_token, auth_db_client));
+
     let state = Arc::new(AppState {
         metadata,
         storage,
         webhook_url,
         tx_events,
         current_dag,
+        auth_state,
     });
-
-    let auth_state = Arc::new(crate::auth::AuthState::new(admin_token));
 
     let app = Router::new()
         .route("/", get(dashboard))
@@ -93,6 +97,7 @@ pub async fn start_server(
         .route("/cache/node/:hash/layers", post(register_node_layers))
         .route("/gc", post(gc_cache))
         .route("/gc/status", get(gc_status))
+        .route("/metrics", get(metrics_handler))
         .route("/analytics", post(report_analytics))
         .route("/build-event", post(receive_build_event))
         .route("/dag", post(register_dag))
@@ -101,7 +106,8 @@ pub async fn start_server(
         .route("/api/layers", get(get_layer_stats_handler))
         .route("/ws", get(ws_handler))
         .layer(middleware::from_fn(add_api_version_header))
-        .layer(axum::middleware::from_fn_with_state(auth_state, crate::auth::auth_middleware))
+        // Add auth routes
+        
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -595,6 +601,17 @@ async fn gc_status() -> impl IntoResponse {
     let gc = crate::gc::GarbageCollector::from_env();
     let status = gc.status().await;
     (StatusCode::OK, Json(status)).into_response()
+}
+
+async fn metrics_handler() -> impl IntoResponse {
+    let registry = crate::metrics::metrics_registry();
+    let metrics = registry.read().await;
+    let output = metrics.encode();
+    (
+        StatusCode::OK,
+        axum::response::AppendHeaders([(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")]),
+        output,
+    ).into_response()
 }
 
 async fn check_layer(
